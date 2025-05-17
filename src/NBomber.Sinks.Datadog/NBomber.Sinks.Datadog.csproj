@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <TargetFramework>netstandard2.1</TargetFramework>
-        <Version>0.1.0-beta.0</Version>
+        <Version>0.1.0-beta.1</Version>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <LangVersion>12.0</LangVersion>
@@ -27,7 +27,7 @@
 
     <ItemGroup>
       <PackageReference Include="DogStatsD-CSharp-Client" Version="8.0.0" />
-      <PackageReference Include="NBomber.Contracts" Version="6.1.0-beta.2" />
+      <PackageReference Include="NBomber.Contracts" Version="6.0.1" />
     </ItemGroup>
     
 </Project>
