@@ -40,6 +40,11 @@ public class DatadogSink : IReportingSink
     public string SinkName => "NBomber.Sinks.Datadog";
 
     /// <summary>
+    /// Gets the underlying <see cref="DogStatsdService"/> used to write metrics.
+    /// </summary>
+    public DogStatsdService DatadogClient => _datadogClient;
+    
+    /// <summary>
     /// Initializes a new instance of the <see cref="DatadogSink"/> class with default configuration.
     /// </summary>
     public DatadogSink() 
@@ -82,8 +87,11 @@ public class DatadogSink : IReportingSink
         }
 
         if (!_datadogClient.Configure(_statsdConfig))
-            throw new InvalidOperationException($"Cannot initialize {nameof(DatadogSink)}. Please check the configuration.");
-        
+        {
+            _logger.Error("Reporting Sink {0} has problems with initialization. The problem could be related to invalid config structure.", SinkName);
+            throw new InvalidOperationException($"Cannot initialize {SinkName}. Please check the configuration.");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -124,7 +132,7 @@ public class DatadogSink : IReportingSink
     }
 
     /// <summary>
-    /// Finalizes the reporting sink. This method is called at the end of the test run.
+    /// Called when the test session ends.
     /// </summary>
     /// <returns>A completed task.</returns>
     public Task Stop()
