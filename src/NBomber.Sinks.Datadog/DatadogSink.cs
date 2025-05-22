@@ -148,9 +148,9 @@ public class DatadogSink : IReportingSink
     }
 
     /// <summary>
-    /// Called when the test session ends.
-    /// </summary>
-    /// <returns>A completed task.</returns>
+    /// Stops the reporting sink and releases any held resources (e.g., network or database connections).
+    /// This method is invoked once the test session ends and should perform any necessary cleanup.
+    /// </summary> 
     public Task Stop()
     {
         _datadogClient.Flush();
