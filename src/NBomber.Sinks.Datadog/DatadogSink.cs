@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using NBomber.Contracts;
+using NBomber.Contracts.Metrics;
 using NBomber.Contracts.Stats;
 using Serilog;
 using StatsdClient;
@@ -96,24 +97,38 @@ public class DatadogSink : IReportingSink
     }
 
     /// <summary>
-    /// Called at the start of a test session.
+    /// Starts the reporting sink at the beginning of a test session.
+    /// This method is called at the start of the test and allows the sink to perform any necessary preparations before data collection begins.
     /// </summary>
-    /// <param name="sessionInfo">Session metadata and configuration information.</param>
-    /// <returns>A completed task.</returns>
+    /// <param name="sessionInfo">Contains metadata about the test session and scenarios that will be executed.</param> 
     public Task Start(SessionStartInfo sessionInfo)
     {
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Saves real-time scenario statistics during the test execution.
+    /// Saves real-time performance statistics during the test run.
+    /// This method is invoked periodically based on the configured <c>ReportingInterval</c> to capture intermediate metrics.
     /// </summary>
-    /// <param name="stats">An array of scenario statistics to send to Datadog.</param>
-    /// <returns>A completed task.</returns>
+    /// <param name="stats">Real-time stats data of the running scenarios.</param>
     public Task SaveRealtimeStats(ScenarioStats[] stats)
     {
         var updatedStats = stats.Select(AddGlobalInfoStep).ToArray();
         SaveStats(updatedStats, OperationType.Bombing);
+        _datadogClient.Flush();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Saves custom metrics collected during scenario execution.
+    /// This method is invoked periodically based on the configured <c>ReportingInterval</c>,
+    /// allowing the reporting sink to persist user-defined metrics such as counters, gauges, or other performance indicators.
+    /// </summary>
+    /// <param name="metrics">A collection of metrics captured during the test session.</param>
+    /// <returns>A task that represents the asynchronous operation of saving the metrics.</returns>
+    public Task SaveRealtimeMetrics(MetricStats metrics)
+    {
+        SaveMetrics(metrics, OperationType.Bombing);
         _datadogClient.Flush();
         return Task.CompletedTask;
     }
@@ -127,6 +142,7 @@ public class DatadogSink : IReportingSink
     {
         var updatedStats = stats.ScenarioStats.Select(AddGlobalInfoStep).ToArray();
         SaveStats(updatedStats, OperationType.Complete);
+        SaveMetrics(stats.Metrics, OperationType.Complete);
         _datadogClient.Flush();
         return Task.CompletedTask;
     }
@@ -158,6 +174,38 @@ public class DatadogSink : IReportingSink
             StatsdServerName = config.StatsdServerName,
             StatsdPort = config.StatsdPort
         };
+    }
+
+    private void SaveMetrics(MetricStats stats, OperationType operationType)
+    {
+        var testInfo = _context.TestInfo;
+        
+        var genericTags = new[]
+        {
+            $"test_suite:{testInfo.TestSuite}",
+            $"test_name:{testInfo.TestName}",
+            $"operation_type:{operationType}"
+        };
+        
+        foreach (var counter in stats.Counters)
+        {
+            var tags = genericTags;
+            
+            if (!string.IsNullOrEmpty(counter.ScenarioName))
+                tags = genericTags.Concat([$"scenario:{counter.ScenarioName}"]).ToArray();
+            
+            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: tags);
+        }
+        
+        foreach (var gauge in stats.Gauges)
+        {
+            var tags = genericTags;
+            
+            if (!string.IsNullOrEmpty(gauge.ScenarioName))
+                tags = genericTags.Concat([$"scenario:{gauge.ScenarioName}"]).ToArray();
+            
+            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: tags);
+        }
     }
     
     private void SaveStats(ScenarioStats[] stats, OperationType operationType)
