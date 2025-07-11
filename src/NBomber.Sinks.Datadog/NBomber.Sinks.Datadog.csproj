@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>netstandard2.1</TargetFramework>
+        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
         <Version>0.1.0-beta.2</Version>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
@@ -27,7 +27,7 @@
 
     <ItemGroup>
       <PackageReference Include="DogStatsD-CSharp-Client" Version="8.0.0" />
-      <PackageReference Include="NBomber.Contracts" Version="6.1.0-beta.4" />
+      <PackageReference Include="NBomber.Contracts" Version="6.1.0-beta.6" />
     </ItemGroup>
     
 </Project>
