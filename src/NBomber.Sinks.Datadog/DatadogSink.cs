@@ -31,7 +31,7 @@ public class DatadogSinkConfig
 public class DatadogSink : IReportingSink
 {
     private ILogger _logger;
-    private DogStatsdService _datadogClient = new();
+    private readonly DogStatsdService _datadogClient = new();
     private IBaseContext _context;
     private StatsdConfig _statsdConfig = new();
 
