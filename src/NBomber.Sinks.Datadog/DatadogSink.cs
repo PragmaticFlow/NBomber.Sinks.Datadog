@@ -194,7 +194,7 @@ public class DatadogSink : IReportingSink
             if (!string.IsNullOrEmpty(counter.ScenarioName))
                 tags = genericTags.Concat([$"scenario:{counter.ScenarioName}"]).ToArray();
             
-            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName.Replace(":", ".")}", counter.Value, tags: tags);
+            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: tags);
         }
         
         foreach (var gauge in stats.Gauges)
@@ -204,7 +204,7 @@ public class DatadogSink : IReportingSink
             if (!string.IsNullOrEmpty(gauge.ScenarioName))
                 tags = genericTags.Concat([$"scenario:{gauge.ScenarioName}"]).ToArray();
             
-            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName.Replace(":", ".")}", gauge.Value, tags: tags);
+            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: tags);
         }
     }
     
