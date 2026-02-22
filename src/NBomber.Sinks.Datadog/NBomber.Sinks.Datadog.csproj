@@ -34,7 +34,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="DogStatsD-CSharp-Client" Version="8.0.0" />
+      <PackageReference Include="DogStatsD-CSharp-Client" Version="9.0.0" />
       <PackageReference Include="NBomber.Contracts" Version="6.1.0" />
     </ItemGroup>
     
