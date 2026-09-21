@@ -4,6 +4,7 @@ using NBomber.Contracts.Metrics;
 using NBomber.Contracts.Stats;
 using Serilog;
 using StatsdClient;
+using System.Globalization;
 
 namespace NBomber.Sinks.Datadog;
 
@@ -178,33 +179,16 @@ public class DatadogSink : IReportingSink
 
     private void SaveMetrics(MetricStats stats, OperationType operationType)
     {
-        var testInfo = _context.TestInfo;
-        
-        var genericTags = new[]
-        {
-            $"test_suite:{testInfo.TestSuite}",
-            $"test_name:{testInfo.TestName}",
-            $"operation_type:{operationType}"
-        };
-        
         foreach (var counter in stats.Counters)
         {
-            var tags = genericTags;
-            
-            if (!string.IsNullOrEmpty(counter.ScenarioName))
-                tags = genericTags.Concat([$"scenario:{counter.ScenarioName}"]).ToArray();
-            
-            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: tags);
+            var tags = BuildMetricTags(operationType, counter.ScenarioName);
+            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: MapTags(tags));
         }
-        
+
         foreach (var gauge in stats.Gauges)
         {
-            var tags = genericTags;
-            
-            if (!string.IsNullOrEmpty(gauge.ScenarioName))
-                tags = genericTags.Concat([$"scenario:{gauge.ScenarioName}"]).ToArray();
-            
-            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: tags);
+            var tags = BuildMetricTags(operationType, gauge.ScenarioName);
+            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: MapTags(tags));
         }
     }
     
@@ -216,16 +200,8 @@ public class DatadogSink : IReportingSink
             
             foreach (var step in scenario.StepStats)
             {
-                var testInfo = _context.TestInfo;
-                var tags = new[]
-                {
-                    $"test_suite:{testInfo.TestSuite}",
-                    $"test_name:{testInfo.TestName}",
-                    $"scenario:{scenario.ScenarioName}", 
-                    $"step:{step.StepName}",
-                    $"operation_type:{operationType}"
-                };
-                    
+                var tags = MapTags(BuildScenarioTags(operationType, scenario, step.StepName));
+
                 var okR = step.Ok.Request;
                 var okL = step.Ok.Latency;
                 var okD = step.Ok.DataTransfer;
@@ -258,7 +234,7 @@ public class DatadogSink : IReportingSink
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent75", okD.Percent75, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent95", okD.Percent95, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent99", okD.Percent99, tags: tags);
-                
+
                 // FAIL
                 _datadogClient.Gauge("nbomber.fail.request.count", fR.Count, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.request.rps", fR.RPS, tags: tags);
@@ -280,7 +256,7 @@ public class DatadogSink : IReportingSink
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent75", fD.Percent75, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent95", fD.Percent95, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent99", fD.Percent99, tags: tags);
-                
+
                 _datadogClient.Gauge("nbomber.simulation.value", simulation.Value, tags: tags);
             }
             
@@ -291,29 +267,75 @@ public class DatadogSink : IReportingSink
     private void SaveStatusCodes(ScenarioStats scnStats, OperationType operationType)
     {
         var statusCodes = scnStats.Ok.StatusCodes.Concat(scnStats.Fail.StatusCodes);
-        
-        var testInfo = _context.TestInfo;
-        
         foreach (var s in statusCodes)
         {
-            var tags = new[]
-            {
-                $"test_suite:{testInfo.TestSuite}",
-                $"test_name:{testInfo.TestName}",
-                $"scenario:{scnStats.ScenarioName}",
-                $"operation_type:{operationType}",
-                $"status_code_status:{s.StatusCode}"
-            };
-            
-            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: tags);
+            var tags = BuildScenarioTags(operationType, scnStats);
+            tags["status_code_status"] = s.StatusCode;
+
+            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: MapTags(tags));
         }
     }
-    
+
     private ScenarioStats AddGlobalInfoStep(ScenarioStats scnStats)
     {
         var globalStepInfo = new StepStats("global information", scnStats.Ok, scnStats.Fail, sortIndex: 0);
         scnStats.StepStats = scnStats.StepStats.Append(globalStepInfo).ToArray();
-            
+
         return scnStats;
     }
+
+    private Dictionary<string, string> BuildGlobalTags(OperationType operationType)
+    {
+        Dictionary<string, string> BuildSessionDefaultTags(OperationType operationType)
+        {
+            var nodeInfo = _context.GetNodeInfo();
+            var testInfo = _context.TestInfo;
+
+            return new Dictionary<string, string>
+            {
+                ["session_id"] = testInfo.SessionId,
+                ["operation_type"] = operationType.ToString(),
+                ["node_type"] = nodeInfo.NodeType.ToString(),
+                ["test_suite"] = testInfo.TestSuite,
+                ["test_name"] = testInfo.TestName,
+                ["cluster_id"] = testInfo.ClusterId
+            };
+        }
+
+        var tags = BuildSessionDefaultTags(operationType);
+        AddTags(tags, _context.TestInfo.Tags);
+
+        return tags;
+    }
+
+    private Dictionary<string, string> BuildScenarioTags(OperationType operationType, ScenarioStats scnStats, string stepName = "")
+    {
+        var tags = BuildGlobalTags(operationType);
+        tags["scenario"] = scnStats.ScenarioName;
+        AddTags(tags, scnStats.Tags);
+
+        if (!string.IsNullOrWhiteSpace(stepName))
+            tags["step"] = stepName;
+
+        return tags;
+    }
+
+    private Dictionary<string, string> BuildMetricTags(OperationType operationType, string scenarioName)
+    {
+        var tags = BuildGlobalTags(operationType);
+
+        if (!string.IsNullOrEmpty(scenarioName))
+            tags["scenario"] = scenarioName;
+
+        return tags;
+    }
+
+    private void AddTags(Dictionary<string, string> target, IReadOnlyDictionary<string, string> tags)
+    {
+        foreach (var tag in tags)
+            target[tag.Key] = tag.Value;
+    }
+
+    private string[] MapTags(Dictionary<string, string> tags) =>
+        tags.Select(t => $"{t.Key}:{t.Value}").ToArray();
 }
