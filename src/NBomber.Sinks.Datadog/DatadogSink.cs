@@ -270,10 +270,11 @@ public class DatadogSink : IReportingSink
     
     private void SaveStatusCodes(ScenarioStats scnStats, OperationType operationType)
     {
+        var tags = BuildScenarioTags(operationType, scnStats);
         var statusCodes = scnStats.Ok.StatusCodes.Concat(scnStats.Fail.StatusCodes);
+        
         foreach (var s in statusCodes)
         {
-            var tags = BuildScenarioTags(operationType, scnStats);
             tags["status_code_status"] = s.StatusCode;
 
             _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: MapTags(tags));
