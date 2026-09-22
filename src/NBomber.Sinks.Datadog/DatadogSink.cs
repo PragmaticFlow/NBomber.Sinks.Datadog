@@ -4,7 +4,6 @@ using NBomber.Contracts.Metrics;
 using NBomber.Contracts.Stats;
 using Serilog;
 using StatsdClient;
-using System.Globalization;
 
 namespace NBomber.Sinks.Datadog;
 
@@ -179,16 +178,19 @@ public class DatadogSink : IReportingSink
 
     private void SaveMetrics(MetricStats stats, OperationType operationType)
     {
+        var metricsTags = stats.Counters.Select(x => x.ScenarioName)
+            .Concat(stats.Gauges.Select(x => x.ScenarioName))
+            .Distinct()
+            .ToDictionary(scnName => scnName, scnName => MapTags(BuildMetricTags(operationType, scnName)));
+
         foreach (var counter in stats.Counters)
         {
-            var tags = BuildMetricTags(operationType, counter.ScenarioName);
-            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: MapTags(tags));
+            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: metricsTags[counter.ScenarioName]);
         }
 
         foreach (var gauge in stats.Gauges)
         {
-            var tags = BuildMetricTags(operationType, gauge.ScenarioName);
-            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: MapTags(tags));
+            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: metricsTags[gauge.ScenarioName]);
         }
     }
     
@@ -196,11 +198,13 @@ public class DatadogSink : IReportingSink
     {
         foreach (var scenario in stats)
         {
+            var scenarioTags = BuildScenarioTags(operationType, scenario);
             var simulation = scenario.LoadSimulationStats;
-            
+
             foreach (var step in scenario.StepStats)
             {
-                var tags = MapTags(BuildScenarioTags(operationType, scenario, step.StepName));
+                scenarioTags["step"] = step.StepName;
+                var tags = MapTags(scenarioTags);
 
                 var okR = step.Ok.Request;
                 var okL = step.Ok.Latency;
