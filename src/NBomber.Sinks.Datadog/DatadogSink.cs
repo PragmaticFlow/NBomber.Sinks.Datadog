@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using System.Collections.Concurrent;
+using Microsoft.Extensions.Configuration;
 using NBomber.Contracts;
 using NBomber.Contracts.Metrics;
 using NBomber.Contracts.Stats;
@@ -34,6 +35,15 @@ public class DatadogSink : IReportingSink
     private readonly DogStatsdService _datadogClient = new();
     private IBaseContext _context;
     private StatsdConfig _statsdConfig = new();
+
+    // Tags are stable for the whole test session, so they are built once and then reused.
+    // Step tags are cached per (scenario, step). The only part that changes per metric is
+    // the "status_code_status" tag, which is appended to the cached scenario tags via Array.CopyTo.
+    private OperationType? _cachedOperationType;
+    private Dictionary<string, string> _globalTags = null;
+    private readonly ConcurrentDictionary<string, string[]> _scenarioTags = new();
+    private readonly ConcurrentDictionary<(string Scenario, string Step), string[]> _stepTags = new();
+    private readonly ConcurrentDictionary<string, string[]> _metricTags = new();
 
     /// <summary>
     /// Gets the name of the sink, used for identification within NBomber.
@@ -103,6 +113,7 @@ public class DatadogSink : IReportingSink
     /// <param name="sessionInfo">Contains metadata about the test session and scenarios that will be executed.</param> 
     public Task Start(SessionStartInfo sessionInfo)
     {
+        ClearTagsCache();
         return Task.CompletedTask;
     }
 
@@ -114,8 +125,10 @@ public class DatadogSink : IReportingSink
     public Task SaveRealtimeStats(ScenarioStats[] stats)
     {
         var updatedStats = stats.Select(AddGlobalInfoStep).ToArray();
+        
         SaveStats(updatedStats, OperationType.Bombing);
         _datadogClient.Flush();
+        
         return Task.CompletedTask;
     }
 
@@ -130,6 +143,7 @@ public class DatadogSink : IReportingSink
     {
         SaveMetrics(metrics, OperationType.Bombing);
         _datadogClient.Flush();
+        
         return Task.CompletedTask;
     }
 
@@ -141,9 +155,11 @@ public class DatadogSink : IReportingSink
     public Task SaveFinalStats(NodeStats stats)
     {
         var updatedStats = stats.ScenarioStats.Select(AddGlobalInfoStep).ToArray();
+        
         SaveStats(updatedStats, OperationType.Complete);
         SaveMetrics(stats.Metrics, OperationType.Complete);
         _datadogClient.Flush();
+        
         return Task.CompletedTask;
     }
 
@@ -178,33 +194,30 @@ public class DatadogSink : IReportingSink
 
     private void SaveMetrics(MetricStats stats, OperationType operationType)
     {
-        var metricsTags = stats.Counters.Select(x => x.ScenarioName)
-            .Concat(stats.Gauges.Select(x => x.ScenarioName))
-            .Distinct()
-            .ToDictionary(scnName => scnName, scnName => MapTags(BuildMetricTags(operationType, scnName)));
+        EnsureTagCache(operationType);
 
         foreach (var counter in stats.Counters)
         {
-            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: metricsTags[counter.ScenarioName]);
+            _datadogClient.Gauge($"nbomber.counters.{counter.MetricName}", counter.Value, tags: GetMetricTags(operationType, counter.ScenarioName));
         }
 
         foreach (var gauge in stats.Gauges)
         {
-            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: metricsTags[gauge.ScenarioName]);
+            _datadogClient.Gauge($"nbomber.gauges.{gauge.MetricName}", gauge.Value, tags: GetMetricTags(operationType, gauge.ScenarioName));
         }
     }
     
     private void SaveStats(ScenarioStats[] stats, OperationType operationType)
     {
+        EnsureTagCache(operationType);
+
         foreach (var scenario in stats)
         {
-            var scenarioTags = BuildScenarioTags(operationType, scenario);
             var simulation = scenario.LoadSimulationStats;
 
             foreach (var step in scenario.StepStats)
             {
-                scenarioTags["step"] = step.StepName;
-                var tags = MapTags(scenarioTags);
+                var tags = GetStepTags(operationType, scenario, step.StepName);
 
                 var okR = step.Ok.Request;
                 var okL = step.Ok.Latency;
@@ -270,28 +283,71 @@ public class DatadogSink : IReportingSink
     
     private void SaveStatusCodes(ScenarioStats scnStats, OperationType operationType)
     {
-        var tags = BuildScenarioTags(operationType, scnStats);
+        var scenarioTags = GetScenarioTags(operationType, scnStats);
         var statusCodes = scnStats.Ok.StatusCodes.Concat(scnStats.Fail.StatusCodes);
-        
+
         foreach (var s in statusCodes)
         {
-            tags["status_code_status"] = s.StatusCode;
+            var tags = AppendTag(scenarioTags, "status_code_status", s.StatusCode);
 
-            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: MapTags(tags));
+            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: tags);
         }
     }
 
     private ScenarioStats AddGlobalInfoStep(ScenarioStats scnStats)
     {
         var globalStepInfo = new StepStats("global information", scnStats.Ok, scnStats.Fail, sortIndex: 0);
-        scnStats.StepStats = scnStats.StepStats.Append(globalStepInfo).ToArray();
+        scnStats.StepStats = [.. scnStats.StepStats, globalStepInfo];
 
         return scnStats;
     }
 
+    /// <summary>
+    /// Drops the cached tags if they were built for a different operation type.
+    /// The operation type changes at most once per session (Bombing -> Complete).
+    /// </summary>
+    private void EnsureTagCache(OperationType operationType)
+    {
+        if (_cachedOperationType == operationType) return;
+
+        ClearTagsCache();
+        _cachedOperationType = operationType;
+    }
+
+    private void ClearTagsCache()
+    {
+        _cachedOperationType = null;
+        _globalTags = null;
+        _scenarioTags.Clear();
+        _stepTags.Clear();
+        _metricTags.Clear();
+    }
+
+    private Dictionary<string, string> GetGlobalTags(OperationType operationType) =>
+        _globalTags ??= BuildGlobalTags(operationType);
+
+    private string[] GetScenarioTags(OperationType operationType, ScenarioStats scnStats) =>
+        _scenarioTags.GetOrAdd(scnStats.ScenarioName,
+            static (_, state) => state.Sink.BuildScenarioTags(state.OperationType, state.ScnStats),
+            (Sink: this, OperationType: operationType, ScnStats: scnStats));
+
+    private string[] GetStepTags(OperationType operationType, ScenarioStats scnStats, string stepName) =>
+        _stepTags.GetOrAdd((scnStats.ScenarioName, stepName),
+            static (key, state) =>
+            {
+                var scnTags = state.Sink.GetScenarioTags(state.OperationType, state.ScnStats);
+                return AppendTag(scnTags, "step", key.Step);
+            },
+            (Sink: this, OperationType: operationType, ScnStats: scnStats));
+
+    private string[] GetMetricTags(OperationType operationType, string scenarioName) =>
+        _metricTags.GetOrAdd(scenarioName,
+            static (scnName, state) => state.Sink.BuildMetricTags(state.OperationType, scnName),
+            (Sink: this, OperationType: operationType));
+
     private Dictionary<string, string> BuildGlobalTags(OperationType operationType)
     {
-        Dictionary<string, string> BuildSessionDefaultTags(OperationType operationType)
+        Dictionary<string, string> BuildSessionDefaultTags(OperationType operation)
         {
             var nodeInfo = _context.GetNodeInfo();
             var testInfo = _context.TestInfo;
@@ -299,7 +355,7 @@ public class DatadogSink : IReportingSink
             return new Dictionary<string, string>
             {
                 ["session_id"] = testInfo.SessionId,
-                ["operation_type"] = operationType.ToString(),
+                ["operation_type"] = operation.ToString(),
                 ["node_type"] = nodeInfo.NodeType.ToString(),
                 ["test_suite"] = testInfo.TestSuite,
                 ["test_name"] = testInfo.TestName,
@@ -313,26 +369,33 @@ public class DatadogSink : IReportingSink
         return tags;
     }
 
-    private Dictionary<string, string> BuildScenarioTags(OperationType operationType, ScenarioStats scnStats, string stepName = "")
+    private string[] BuildScenarioTags(OperationType operationType, ScenarioStats scnStats)
     {
-        var tags = BuildGlobalTags(operationType);
-        tags["scenario"] = scnStats.ScenarioName;
+        var globalTags = GetGlobalTags(operationType);
+        
+        var tags = new Dictionary<string, string>(globalTags)
+        {
+            ["scenario"] = scnStats.ScenarioName
+        };
+
         AddTags(tags, scnStats.Tags);
 
-        if (!string.IsNullOrWhiteSpace(stepName))
-            tags["step"] = stepName;
-
-        return tags;
+        return MapTags(tags);
     }
 
-    private Dictionary<string, string> BuildMetricTags(OperationType operationType, string scenarioName)
+    private string[] BuildMetricTags(OperationType operationType, string scenarioName)
     {
-        var tags = BuildGlobalTags(operationType);
+        var globalTags = GetGlobalTags(operationType);
 
-        if (!string.IsNullOrEmpty(scenarioName))
-            tags["scenario"] = scenarioName;
+        if (string.IsNullOrEmpty(scenarioName))
+            return MapTags(globalTags);
 
-        return tags;
+        var tags = new Dictionary<string, string>(globalTags)
+        {
+            ["scenario"] = scenarioName
+        };
+
+        return MapTags(tags);
     }
 
     private void AddTags(Dictionary<string, string> target, IReadOnlyDictionary<string, string> tags)
@@ -343,4 +406,13 @@ public class DatadogSink : IReportingSink
 
     private string[] MapTags(Dictionary<string, string> tags) =>
         tags.Select(t => $"{t.Key}:{t.Value}").ToArray();
+
+    private static string[] AppendTag(string[] tags, string key, string value)
+    {
+        var result = new string[tags.Length + 1];
+        tags.CopyTo(result, 0);
+        result[tags.Length] = $"{key}:{value}";
+
+        return result;
+    }
 }
