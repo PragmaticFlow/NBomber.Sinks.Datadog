@@ -31,16 +31,16 @@ public class DatadogSinkConfig
 /// </summary>
 public class DatadogSink : IReportingSink
 {
-    private ILogger _logger;
+    private ILogger? _logger;
     private readonly DogStatsdService _datadogClient = new();
-    private IBaseContext _context;
+    private IBaseContext? _context;
     private StatsdConfig _statsdConfig = new();
 
     // Tags are stable for the whole test session, so they are built once and then reused.
     // Step tags are cached per (scenario, step). The only part that changes per metric is
     // the "status_code_status" tag, which is appended to the cached scenario tags via Array.CopyTo.
     private OperationType? _cachedOperationType;
-    private Dictionary<string, string> _globalTags = null;
+    private Dictionary<string, string>? _globalTags;
     private readonly ConcurrentDictionary<string, string[]> _scenarioTags = new();
     private readonly ConcurrentDictionary<(string Scenario, string Step), string[]> _stepTags = new();
     private readonly ConcurrentDictionary<string, string[]> _metricTags = new();
@@ -349,8 +349,8 @@ public class DatadogSink : IReportingSink
     {
         Dictionary<string, string> BuildSessionDefaultTags(OperationType operation)
         {
-            var nodeInfo = _context.GetNodeInfo();
-            var testInfo = _context.TestInfo;
+            var nodeInfo = _context!.GetNodeInfo();
+            var testInfo = _context!.TestInfo;
 
             return new Dictionary<string, string>
             {
@@ -363,7 +363,7 @@ public class DatadogSink : IReportingSink
         }
 
         var tags = BuildSessionDefaultTags(operationType);
-        AddTags(tags, _context.TestInfo.Tags);
+        MergeTags(tags, _context!.TestInfo.Tags);
 
         return tags;
     }
@@ -377,7 +377,7 @@ public class DatadogSink : IReportingSink
             ["scenario"] = scnStats.ScenarioName
         };
 
-        AddTags(tags, scnStats.Tags);
+        MergeTags(tags, scnStats.Tags);
 
         return MapTags(tags);
     }
@@ -397,7 +397,7 @@ public class DatadogSink : IReportingSink
         return MapTags(tags);
     }
 
-    private void AddTags(Dictionary<string, string> target, IReadOnlyDictionary<string, string> tags)
+    private void MergeTags(Dictionary<string, string> target, IReadOnlyDictionary<string, string> tags)
     {
         foreach (var tag in tags)
             target[tag.Key] = tag.Value;
