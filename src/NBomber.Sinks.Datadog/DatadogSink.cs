@@ -37,12 +37,11 @@ public class DatadogSink : IReportingSink
     private StatsdConfig _statsdConfig = new();
 
     // Tags are stable for the whole test session, so they are built once and then reused.
-    // Step tags are cached per (scenario, step). The only part that changes per metric is
-    // the "status_code_status" tag, which is appended to the cached scenario tags via Array.CopyTo.
     private OperationType? _cachedOperationType;
     private Dictionary<string, string>? _globalTags;
     private readonly ConcurrentDictionary<string, string[]> _scenarioTags = new();
     private readonly ConcurrentDictionary<(string Scenario, string Step), string[]> _stepTags = new();
+    private readonly ConcurrentDictionary<(string Scenario, string StatusCode), string[]> _statusCodeTags = new();
     private readonly ConcurrentDictionary<string, string[]> _metricTags = new();
 
     /// <summary>
@@ -283,12 +282,11 @@ public class DatadogSink : IReportingSink
     
     private void SaveStatusCodes(ScenarioStats scnStats, OperationType operationType)
     {
-        var scenarioTags = GetScenarioTags(operationType, scnStats);
         var statusCodes = scnStats.Ok.StatusCodes.Concat(scnStats.Fail.StatusCodes);
 
         foreach (var s in statusCodes)
         {
-            var tags = AppendTag(scenarioTags, "status_code_status", s.StatusCode);
+            var tags = GetStatusCodeTags(operationType, scnStats, s.StatusCode);
 
             _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: tags);
         }
@@ -318,8 +316,10 @@ public class DatadogSink : IReportingSink
     {
         _cachedOperationType = null;
         _globalTags = null;
+        
         _scenarioTags.Clear();
         _stepTags.Clear();
+        _statusCodeTags.Clear();
         _metricTags.Clear();
     }
 
@@ -337,6 +337,15 @@ public class DatadogSink : IReportingSink
             {
                 var scnTags = state.Sink.GetScenarioTags(state.OperationType, state.ScnStats);
                 return AppendTag(scnTags, "step", key.Step);
+            },
+            (Sink: this, OperationType: operationType, ScnStats: scnStats));
+
+    private string[] GetStatusCodeTags(OperationType operationType, ScenarioStats scnStats, string statusCode) =>
+        _statusCodeTags.GetOrAdd((scnStats.ScenarioName, statusCode),
+            static (key, state) =>
+            {
+                var scnTags = state.Sink.GetScenarioTags(state.OperationType, state.ScnStats);
+                return AppendTag(scnTags, "status_code_status", key.StatusCode);
             },
             (Sink: this, OperationType: operationType, ScnStats: scnStats));
 
