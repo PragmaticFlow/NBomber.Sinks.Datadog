@@ -358,8 +358,7 @@ public class DatadogSink : IReportingSink
                 ["operation_type"] = operation.ToString(),
                 ["node_type"] = nodeInfo.NodeType.ToString(),
                 ["test_suite"] = testInfo.TestSuite,
-                ["test_name"] = testInfo.TestName,
-                ["cluster_id"] = testInfo.ClusterId
+                ["test_name"] = testInfo.TestName
             };
         }
 
