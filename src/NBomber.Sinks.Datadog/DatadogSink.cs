@@ -282,11 +282,11 @@ public class DatadogSink : IReportingSink
 
     private void SaveStatusCodes(ScenarioStats scnStats, StepStats step, OperationType operationType)
     {
-        foreach (var s in step.Ok.StatusCodes.Concat(step.Fail.StatusCodes))
+        foreach (var stStatus in step.Ok.StatusCodes.Concat(step.Fail.StatusCodes))
         {
-            var tags = GetStatusCodeTags(operationType, scnStats, step.StepName, s.StatusCode);
+            var tags = GetStatusCodeTags(operationType, scnStats, step.StepName, stStatus.StatusCode);
 
-            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: tags);
+            _datadogClient.Gauge("nbomber.status_code.count", stStatus.Count, tags: tags);
         }
     }
 
