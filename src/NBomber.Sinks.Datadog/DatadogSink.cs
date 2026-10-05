@@ -41,7 +41,7 @@ public class DatadogSink : IReportingSink
     private Dictionary<string, string>? _globalTags;
     private readonly ConcurrentDictionary<string, string[]> _scenarioTags = new();
     private readonly ConcurrentDictionary<(string Scenario, string Step), string[]> _stepTags = new();
-    private readonly ConcurrentDictionary<(string Scenario, string StatusCode), string[]> _statusCodeTags = new();
+    private readonly ConcurrentDictionary<(string Scenario, string Step, string StatusCode), string[]> _statusCodeTags = new();
     private readonly ConcurrentDictionary<string, string[]> _metricTags = new();
 
     /// <summary>
@@ -274,21 +274,19 @@ public class DatadogSink : IReportingSink
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent99", fD.Percent99, tags: tags);
 
                 _datadogClient.Gauge("nbomber.simulation.value", simulation.Value, tags: tags);
+
+                SaveStatusCodes(scenario, step, operationType);
             }
-            
-            SaveStatusCodes(scenario, operationType);
         }
     }
-    
-    private void SaveStatusCodes(ScenarioStats scnStats, OperationType operationType)
+
+    private void SaveStatusCodes(ScenarioStats scnStats, StepStats step, OperationType operationType)
     {
-        var statusCodes = scnStats.Ok.StatusCodes.Concat(scnStats.Fail.StatusCodes);
-
-        foreach (var s in statusCodes)
+        foreach (var stStatus in step.Ok.StatusCodes.Concat(step.Fail.StatusCodes))
         {
-            var tags = GetStatusCodeTags(operationType, scnStats, s.StatusCode);
+            var tags = GetStatusCodeTags(operationType, scnStats, step.StepName, stStatus.StatusCode);
 
-            _datadogClient.Gauge("nbomber.status_code.count", s.Count, tags: tags);
+            _datadogClient.Gauge("nbomber.status_code.count", stStatus.Count, tags: tags);
         }
     }
 
@@ -340,12 +338,12 @@ public class DatadogSink : IReportingSink
             },
             (Sink: this, OperationType: operationType, ScnStats: scnStats));
 
-    private string[] GetStatusCodeTags(OperationType operationType, ScenarioStats scnStats, string statusCode) =>
-        _statusCodeTags.GetOrAdd((scnStats.ScenarioName, statusCode),
+    private string[] GetStatusCodeTags(OperationType operationType, ScenarioStats scnStats, string stepName, string statusCode) =>
+        _statusCodeTags.GetOrAdd((scnStats.ScenarioName, stepName, statusCode),
             static (key, state) =>
             {
-                var scnTags = state.Sink.GetScenarioTags(state.OperationType, state.ScnStats);
-                return AppendTag(scnTags, "status_code_status", key.StatusCode);
+                var stepTags = state.Sink.GetStepTags(state.OperationType, state.ScnStats, key.Step);
+                return AppendTag(stepTags, "status_code_status", key.StatusCode);
             },
             (Sink: this, OperationType: operationType, ScnStats: scnStats));
 
