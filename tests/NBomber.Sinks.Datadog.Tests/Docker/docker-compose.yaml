@@ -1,0 +1,28 @@
+# NBomber + DatadogSink --DogStatsD/UDP--> Telegraf --remote write--> Prometheus <--PromQL-- tests
+
+name: nbomber-sinks-datadog-tests
+
+services:
+
+    prometheus:
+        image: prom/prometheus:v3.15.0
+        command:
+            - --config.file=/etc/prometheus/prometheus.yml # default config shipped with the image
+            - --web.enable-remote-write-receiver
+        ports:
+            - "9090:9090"   # HTTP API / UI
+        healthcheck:
+            test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+            interval: 2s
+            timeout: 2s
+            retries: 15
+
+    telegraf:
+        image: telegraf:1.40.1
+        ports:
+            - "8125:8125/udp" # DogStatsD
+        volumes:
+            - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+        depends_on:
+            prometheus:
+                condition: service_healthy
