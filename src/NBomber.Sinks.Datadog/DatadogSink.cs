@@ -345,7 +345,7 @@ public class DatadogSink : IReportingSink
             static (key, state) =>
             {
                 var scnTags = state.Sink.GetScenarioTags(state.OperationType, state.ScnStats);
-                return AppendTag(scnTags, "status_code.status", key.StatusCode);
+                return AppendTag(scnTags, "status_code_status", key.StatusCode);
             },
             (Sink: this, OperationType: operationType, ScnStats: scnStats));
 
