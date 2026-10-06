@@ -246,6 +246,7 @@ public class DatadogSink : IReportingSink
                 _datadogClient.Gauge("nbomber.ok.datatransfer.mean", okD.MeanBytes, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.max", okD.MaxBytes, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.all", okD.AllBytes, tags: tags);
+                _datadogClient.Gauge("nbomber.ok.datatransfer.bytes_per_second", okD.BytesPerSecond, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent50", okD.Percent50, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent75", okD.Percent75, tags: tags);
                 _datadogClient.Gauge("nbomber.ok.datatransfer.percent95", okD.Percent95, tags: tags);
@@ -268,6 +269,7 @@ public class DatadogSink : IReportingSink
                 _datadogClient.Gauge("nbomber.fail.datatransfer.mean", fD.MeanBytes, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.max", fD.MaxBytes, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.all", fD.AllBytes, tags: tags);
+                _datadogClient.Gauge("nbomber.fail.datatransfer.bytes_per_second", fD.BytesPerSecond, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent50", fD.Percent50, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent75", fD.Percent75, tags: tags);
                 _datadogClient.Gauge("nbomber.fail.datatransfer.percent95", fD.Percent95, tags: tags);
